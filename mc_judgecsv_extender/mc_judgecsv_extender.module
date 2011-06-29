@@ -1,0 +1,39 @@
+<?php
+// $Id: mc_judgecsv.module
+
+/**
+* @file
+* The node-juge_csv.tpl.php file calls mc_csv_update() when the proper 'Operation Field' is selected.
+*/
+
+function mc_node_update($nid,$update_value) {
+	$node = node_load($nid);
+//	drupal_set_message("$node->title loaded");
+	$node->field_fdbkwritten[0]['value'] = $update_value;
+	node_save($node);
+}
+
+function mc_csv_update(&$node,$testing=FALSE) {
+	$row = 0;
+	if (($handle = fopen($node->field_csvfile[0]["filepath"], "r")) !== FALSE) {
+    	print "<p>Processing rows ";
+    	while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+        	$num = count($data);
+        	if ($num == 2 && is_numeric($data[0])){
+        		echo "$row ($num vals), ";
+        		$nid = intval($data[0]);
+        		$update_value = $data[1];
+        		mc_node_update($nid,$update_value);
+        		$node->field_jb_asmt_nids[0]["value"] .= ' ' . $nid;
+        	} else {
+        		drupal_set_message("CSV Extender:$num values on row $row, first item $data[0]");
+        	}
+        	$row++;
+    	}
+    	node_save($node);
+    	fclose($handle);
+    	drupal_set_message($row . " rows successfully updated!" ,'status');
+    } else {
+    	drupal_set_message("CSV Extender: Error loading CSV file '" . $node->field_csvfile[0]["filepath"] . "'. Import failed. Please check that the file is named correctly and exists on the server.",'error');
+    }
+}

@@ -1,0 +1,323 @@
+<?php 
+
+/**
+ * Utilities & timesavers
+ */
+ 
+function user_has_created($uid = null,$typename = null) {
+	if ($typename == null || $uid == null) {
+		return FALSE;
+	}
+	return db_result(db_query("SELECT nid FROM p_node node WHERE type = '%s' AND uid = %d", $typename, $uid));
+}
+
+function userg_has_created($typename = null) {
+	global $user;
+	$uid = $user->uid;
+	return user_has_created($uid,$typename);
+}
+
+/**
+ * Redirect folks from their roles! This used to be much more intricate, 
+ * now everybody just goes to the dashboard!
+ */
+
+function mc_ux_user($op, &$edit, &$account, $category = NULL) {
+	if ($op == 'login') {
+		global $user;
+		if (in_array('MC Approved Judge',$user->roles)) {
+			drupal_goto('dashboard');
+		} else if (in_array('Judge',$user->roles)) {
+			/*$path = drupal_get_path_alias('user/' . $user->uid . '/edit'); 
+			drupal_goto($base_url . $path . '/judge_mentor_profile','destination=user');*/
+			drupal_goto('dashboard');
+		} else if (in_array('Entrant',$user->roles)) {
+			drupal_goto('dashboard');
+		} else if (in_array('Mentor',$user->roles)) {
+			drupal_goto('dashboard');
+		} else {
+			drupal_goto('dashboard');
+		}
+	}
+}
+
+/**
+ * Implementation of hook block for some prompt messages.
+ */
+ 
+function mc_ux_block($op = 'list', $delta = 0, $edit = array()) {
+  if ($op == 'list') {
+    $blocks[0] = array(
+      'info' => t('mc_ux: User Settings Menu'), 
+      'cache' => BLOCK_CACHE_PER_ROLE | BLOCK_CACHE_PER_PAGE,
+    );
+    // BLOCK_CACHE_PER_ROLE will be assumed for block 0.
+
+    $blocks[1] = array(
+      'info' => t('mc_ux: Mentor Profile Missing Info'), 
+      'cache' => BLOCK_CACHE_PER_ROLE | BLOCK_CACHE_PER_PAGE,
+    );
+
+    $blocks[2] = array(
+      'info' => t('mc_ux: You have no profile pic'), 
+      'cache' => BLOCK_CACHE_PER_ROLE | BLOCK_CACHE_PER_PAGE,
+    );
+    
+    return $blocks;
+  }
+  else if ($op == 'configure' && $delta == 0) {
+    $form['items'] = array(
+      '#type' => 'select', 
+      '#title' => t('Number of items'), 
+      '#default_value' => variable_get('mc_ux_block_items', 0), 
+      '#options' => array('1', '2', '3'),
+    );
+    return $form;
+  }
+  else if ($op == 'save' && $delta == 0) {
+    variable_set('mc_ux_block_items', $edit['items']);
+  }
+  else if ($op == 'view') {
+    switch ($delta) {
+      case 0:
+        $block = array(
+          'subject' => t('User Settings'), 
+          'content' => mc_ux_user_menu_block(),
+        );
+        break;
+      case 1:
+        $block = array( 
+          'content' => mc_ux_missing_info_block(),
+        );
+        break;
+      case 2:
+        $block = array(
+          'subject' => t('Your Mentor Profile is Incomplete'), 
+          'content' => mc_ux_profile_complete_block(),
+        );
+        break;
+    }
+    return $block;
+  }
+}
+
+
+/**
+ * Getting users to fill out their profiles...
+ */
+ 
+function mc_ux_profile_complete_block() {
+	global $user;
+	$acct = user_load($user->uid);
+	$edit_acct_link = '/user/'.$user->uid.'/edit';
+	if (!($acct->picture)) {
+		drupal_set_message('Your profile is incomplete. Please provide a profile picture <a href="'.$edit_acct_link.'">here</a>.'.$user->picture,'status');
+	}
+}
+
+function mc_ux_missing_info_block() {
+	global $user;
+	if ((in_array('Mentor',$user->roles)) || (in_array('MC Moderated',$user->roles))) {
+		$type = 'user_profile';
+		$uid = $user->uid;
+
+		$upfl_nid = db_result(db_query("SELECT nid FROM p_node node WHERE type = '%s' AND uid = %d", $type, $uid));
+		//$nid = $has_upfl ? $upfl_nid : null;
+	
+		if ($upfl_nid) {
+			$upfl = node_load($upfl_nid);
+			$required_fields = array(
+				'field_title',
+				'field_ufirstname',
+				'field_ulastname',
+				'field_title',
+				'field_up_company_name',
+				'field_up_mcat',
+				'field_up_email_address',
+				'field_up_mentoring_specialties',
+				'field_up_prim_xpts',
+				'field_up_scnd_xpts',
+			);
+			$filled = TRUE;
+			foreach ($required_fields as $field) {
+				$f = $upfl->$field;
+				//drupal_set_message($field);
+				//drupal_set_message($f[0]["value"]);
+				if (!($f[0]["value"])) {
+					$filled = FALSE;
+					break;
+				}
+			}
+			
+			if (!($filled)) {
+				$edit_acct_link = '/user/'.$user->uid.'/edit/user_profile';
+				drupal_set_message('Your mentor profile is incomplete. Please <a href="'.$edit_acct_link.'">edit it now</a>.','status');
+			}
+		} else {
+			drupal_set_message('You do not have a mentor profile! Get started and <a href="/node/add/profile">create one now</a>.','status');
+		}
+	}
+}
+
+/**
+ * Dynamic user menu block
+ * Why not use a Drupal menu? Because we only show some links to the owners of entry form content.
+ */
+ 
+function mc_ux_user_menu_block() {
+	global $user;
+
+	$upfl = 'user_profile';
+	$uid = $user->uid;
+	//drupal_set_message(print_r($user->roles,TRUE));
+	$has_profile = user_has_created($uid,$upfl);
+	
+	/* sanity check
+	if ($has_profile != FALSE) {
+		drupal_set_message('Has a <a href="/node/'.$has_profile.'">profile</a>.');
+	} else { 
+		drupal_set_message("Has not.");
+	}*/
+
+	$profile_path = $has_profile ? '/user/'.$user->uid.'/edit/user_profile': '/user/profile';
+
+	$menu_ul='<ul>';
+	$menu_ul.='<li><a href="/user/'.$user->uid.'/edit">Password &amp; Photo</a></li>';
+	$menu_ul.='<li><a href="'.$profile_path.'">User Profile</a></li>';
+	$menu_ul.='<li><a href="/user/roles/">Manage My Roles</a></li>';
+	if (!in_array('Paid Entrant',$user->roles)) {
+			$menu_ul.='<li><a href="/browse/mentors/">Mentor Directory</a></li>';
+		}
+	$menu_ul.='</ul>';
+	return $menu_ul;
+}
+
+/**
+ * User-selected role additions! Now supporting mentor role.
+ */
+
+function add_mentor_role_to_user() {
+	//drupal_set_message('Adding role to user...');
+	global $user;
+	$myuser = user_load($user->uid); 
+	$roles = $myuser->roles; 
+	$roles[13] = 'Mentor';
+	user_save($myuser, array('roles' => $roles)); 
+}
+
+/**
+ * User profile displays certain fields only for prospective mentors
+ */
+
+function mc_ux_form_alter(&$form, $form_state, $form_id) {
+	global $user;
+	if (!in_array('Site Admin',$user->roles)){
+		$form['body_filter']['filter'] = filter_form(1);
+		$form['body_filter']['filter']['#type'] = 'hidden';
+		unset($form['body_field']['format']);
+	}
+	if ($form_id == "user_profile_form") {
+		unset($form["contact"]);
+		$form["timezone"]['#type'] = 'hidden';
+	}
+	if ($form_id == "user_profile_node_form") {
+		//drupal_set_message(print_r($form,true),'error');
+		
+		if ((arg(0) == "user" && arg(1) == 'roles') || (arg(0) == 'node' && arg(2) == 'edit')) {
+		/*
+	     * If this is a user profile on the 'manage roles' page, regardless of
+	 	 * user role, make mentoring fields required.
+	 	 */
+	 	 	$form['#submit'][1] = 'add_mentor_role_to_user';
+			required_mentor_fields($form);
+						
+			if (isset($form['changed']['#default_value'])) {
+				add_manage_roles_header_to_form($form);
+			}
+
+		} else if ((arg(0) == "user" && arg(1) == 'profile') || (arg(0) == "node" && arg(1) == "add" && arg(2) == 'user-profile') || (arg(0) == 'user' && arg(2) == 'edit' && arg(3) == 'user_profile')) {
+		/*
+	     * Alternatively for the user profile page, remove the mandatory fields
+	 	 * unless they're already tagged as a mentor
+	 	 */
+	 	 global $user;
+	 		if (!(in_array('Mentor',$user->roles) || in_array('MC Moderated',$user->roles))) {
+	 			remove_mentor_fields($form);
+	 		} else {
+	 			required_mentor_fields($form);
+	 		}
+		}		
+		//drupal_set_message(print_r($form['field_up_mentoring_specialties']));
+	} 
+}
+
+/**
+ * There are two forms of URL that both allow users to request new roles-- this
+ * same message appears at both.
+ */
+
+function manage_role_header() {
+	global $user;
+	$option2 = (in_array('Mentor',$user->roles) || in_array('MC Moderated',$user->roles)) ? '' : '<option value="mentor">Mentor</option>';
+	$description = '<p>I would like to add a role to my account: <select id="manage-my-roles"><option value="none"> - Choose One - </option>'.$option2.'</select></p><p class="toggle-hide">If you would like to be considered as a mentor, please submit the form below.</p>';
+	return $description;
+}
+
+function add_manage_roles_header_to_form(&$form){
+	$description = '<h1>Manage My Roles</h1>' . manage_role_header();
+	$form['upfl_edit'] = array(
+		'#type'=>'textarea',
+		'#description'=>$description,
+		'#default_value'=>'upfl_edit',
+	);
+}
+
+/**
+ * Add required fields to prospective mentors' user profiles.
+ */
+
+function required_mentor_fields(&$form) {
+	//adding required mentor fields
+	$basic_required_fields = array(
+		'field_title',
+		'field_up_mcat',
+		'field_up_email_address',
+		'field_up_mentoring_specialties',
+		'field_up_prim_xpts',
+		'field_up_scnd_xpts',
+	);
+	foreach ($basic_required_fields as $field) {
+		if (isset($form['group_basic_info'][$field])) {
+			$form['group_basic_info'][$field]['#required'] = TRUE;
+		} else if (isset($form['group_up_bkgd'][$field])) {
+			$form['group_up_bkgd'][$field]['#required'] = TRUE;
+		} else if (isset($form[$field])) {
+			$form[$field]['#required'] = TRUE;
+		}
+	}
+	
+	$form['body_field']['body']['#required'] = TRUE;
+	unset($form['taxonomy']);
+}
+
+/**
+ * Not a prospective mentor? then hide the mentor fields.
+ */
+
+
+function remove_mentor_fields(&$form) {
+	global $user;
+	if (!in_array('Site Admin',$user->roles)) {
+		//drupal_set_message("Removing Mentor Fields");
+		$removed_fields = array(
+			'field_up_mentoring_specialties',
+			'field_up_sltn',
+			'field_up_mcat',
+		);
+		foreach ($removed_fields as $field) {
+			unset($form[$field]);
+			unset($form['group_basic_info'][$field]);
+		}
+		unset($form['group_up_bkgd']);
+	}
+}

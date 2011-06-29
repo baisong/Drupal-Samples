@@ -1,0 +1,6 @@
+; $Id$
+dependencies[] = "jeditable"
+name = MassChallenge Judging Dashboard
+package = "MassChallenge"
+description = Functions & templates used in presenting the judging dashboard.
+core = 6.x

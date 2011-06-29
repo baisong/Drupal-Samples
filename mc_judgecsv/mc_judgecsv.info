@@ -1,0 +1,5 @@
+; $Id$
+name = MassChallenge Judge CSV
+package = "MassChallenge"
+description = Functions used to import CSV files, batch-create and manage judging assignment nodes with feedback forms.
+core = 6.x

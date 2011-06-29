@@ -1,0 +1,433 @@
+<?php
+// $Id: mc_judgedash.module
+
+/**
+* @file
+* Custom functions for this site.
+* @TODO: unify the validation for coloring w/ submission
+* watch out for the @FIXME!
+*/
+
+/**
+function mc_judgedash_theme() {
+	module_load_include('inc', 'mc_judgedash', 'mc_judgedash.theme');
+}
+**/
+
+function mc_format_cell($value) {
+	return '<td>' . $value . '</td>';
+}
+
+function mc_csv_push(&$array,$field) {
+	array_push($array,'"'.$field.'"');
+	return $array;
+}
+function mc_fdbk_csv($node) {
+  	$output = array();
+  	
+	$jid = ($node->uid);
+	$jdge = user_load($jid);
+	$prof = content_profile_load('user_profile', $jdge->uid);
+
+	$fname = $prof->field_ufirstname[0]['value'];
+	$lname = $prof->field_ulastname[0]['value'];	
+	$email = $jdge->mail;
+
+	$output = mc_csv_push($output,$jid);
+	$output = mc_csv_push($output,$email);
+	$output = mc_csv_push($output,$fname);
+	$output = mc_csv_push($output,$lname);
+
+	$judge_category = $prof->field_up_category[0]['value'];
+    $output = mc_csv_push($output,$judge_category);
+    
+    $judge_tags = $prof->taxonomy;
+	$terms = array();
+	foreach ($judge_tags as $count => $term){
+		array_push($terms,$term->name);
+	}
+	$judge_industry = implode('|',$terms);
+	$output = mc_csv_push($output,$judge_industry);
+	$output = mc_csv_push($output,$node->nid);
+	$output = mc_csv_push($output,$node->title);
+		
+	// UID, Judge email, Judge First Name, Judge Last Name, Judge Category, Judge Industry, Feedback Plan NID, Feedback Plan Name, Feedback Plan Status, Feedback Submitted
+	//EXTRA :) Score1 Pain & Sol, Score2 Ov Impact, Score3, Score4, Score5, Score6, Score7, Overall Recommendation, Word Count
+	
+
+	/*if (module_exists('taxonomy')) {
+    	$judge_industry = taxonomy_link('taxonomy terms', $prof);
+        print theme('links', $terms, array('class' => 'node-terms'));
+    } else {
+        print 'No associated categories.';
+    }*/
+	
+	$fdbk_numeric_fields = array(
+		$node->field_solutions_and_technology_s[0]["value"],
+		$node->field_overall_impact_s[0]["value"],
+		$node->field_customer_needs_s[0]["value"],
+		$node->field_industry_and_competitors_s[0]["value"],
+		$node->field_financials_s[0]["value"],
+		$node->field_legal_and_regulatory_s[0]["value"],
+		$node->field_founding_team_s[0]["value"]
+	);
+	
+  	$coi = $node->field_fdbk_coi2[0]["value"];
+  	// [0] No Conflict (count this feedback)
+  	// [1] Not Judged - Conflict of Interest
+  	// [2] Not Judged - Other
+  	
+  	$rec = array("Definitely Don't Recommend","Strongly Don't Recommend","Don't Recommend","Recommend","Strongly Recommend","Definitely Recommend");
+  	$recommend = $node->field_feedback_overall[0]["value"];
+  	
+  	$written = $node->field_fdbkwritten[0]["value"];
+
+	$completestatus =  mc_grid_complete_status($coi,$fdbk_numeric_fields,$recommend,$written);
+	$output = mc_csv_push($output,$completestatus);
+	$output = mc_csv_push($output,$node->status);
+	return $output;
+}
+
+function mc_print_fdbk($node) {
+	$fdbk_numeric_fields = array(
+		$node->field_solutions_and_technology_s[0]["value"],
+		$node->field_overall_impact_s[0]["value"],
+		$node->field_customer_needs_s[0]["value"],
+		$node->field_industry_and_competitors_s[0]["value"],
+		$node->field_financials_s[0]["value"],
+		$node->field_legal_and_regulatory_s[0]["value"],
+		$node->field_founding_team_s[0]["value"]
+	);
+	
+  	$coi = $node->field_fdbk_coi2[0]["value"];
+  	$gray_out = ($coi==1 || $coi==2) ? 'coi' : '';
+  	
+  	$rec = array("Definitely Don't Recommend","Strongly Don't Recommend","Don't Recommend","Recommend","Strongly Recommend","Definitely Recommend");
+  	$rec_val = $node->field_feedback_overall[0]["value"];
+  	
+  	$written = $node->field_fdbkwritten[0]["value"];
+  	
+  	$output = '<span class= "' . $gray_out . '"><table><tr>';
+  	foreach ($fdbk_numeric_fields as $i => $value) {
+		$output .= mc_format_numcell($fdbk_numeric_fields[$i]);	
+	}
+	$output .= mc_format_writtenstatus($written);
+	$output .= mc_format_recommend($coi,$rec_val);
+	
+	$output .= mc_format_completed($coi,$fdbk_numeric_fields,$rec_val,$written);
+	
+	$output .= '</tr></table></span>';
+	return $output;// . var_dump($node->field_feedback_overall[0]);
+}
+
+function mc_print_coi_row() {
+	return '<div class="coi"><span class="coi-text">Conflict of Interest</span></div>';
+}
+
+function mc_format_numcell($value) {
+	
+	$output = '<td class="fdbk-numcell"><p>';
+	if (is_null($value)) {
+	$output .= '-';	
+	} else if ($value==-1) {
+		$output .= "N/A";
+	} else {
+		$output .= $value;
+	}
+	return $output . '<p></td>';
+}
+
+function mc_format_writtenstatus($written) {	
+	$output = '<td class="fdbk-writtenstatus">';
+	$writtenstatus = mc_get_writtenstatus($written);
+	$output .= $writtenstatus;
+	$output .= '</td>';
+	return $output;
+}
+
+function mc_format_recommend($coi,$value) {
+	$output = '<td class="fdbk-recommend"><p>';
+	if (is_null($coi)) {
+			$output .= 'Not Completed';
+	} else if ($coi==1) {
+		$output .= "Conflict of Interest";
+	} else if ($coi==2) {
+		$output .= "Not Judged - Other";
+	} else {
+		$views = array(
+			"Definitely Don't Recommend",
+			"Strongly Don't Recommend",
+			"Don't Recommend",
+			"Recommend",
+			"Strongly Recommend",
+			"Definitely Recommend"
+		);
+		$msg = $views[(intval($value)-1)];
+		if (strlen($msg) > 1) {
+			$output .= $msg;
+		} else {
+			$output .= 'Not Completed';
+		}
+	}
+	return $output . '</p></td>';
+}
+
+function mc_feedback_long_enough($written) {
+	$minlength = 50;
+	if (!isset($written) || count(explode(' ', $written)) < $minlength){
+		return FALSE;
+	}
+	return TRUE;
+}
+
+function print_user_submitted_count() {
+	global $user;
+	$uid = $user->uid;
+	
+	
+	//$query = "SELECT node.nid AS nid FROM {node} node INNER JOIN {users} users ON node.uid = users.uid LEFT JOIN {history} history_user ON node.nid = history_user.nid AND history_user.uid = " . $uid . " LEFT JOIN {node_revisions} node_revisions ON node.vid = node_revisions.vid WHERE (node.type in ('assignment')) AND ((users.uid) = ('asdf')) ORDER BY node_created DESC, node_changed DESC
+	
+}
+
+function mc_grid_complete_status($coi,$numerics,$recommend,$written) {
+	if (is_null($coi)) {
+		return 'Not Started';
+	}
+	if ($coi==1) {
+		return 'Conflict of Interest';
+	}
+	if ($coi==2) {
+		return 'Not Judged - Other';
+	}
+	//$numbers = range(-1,10);
+	foreach ($numerics as $n => $value) {
+                if($value==0 && is_numeric($value)) {
+			continue;
+		}
+		if (empty($value)) {
+			return 'Incomplete Numbers';
+		}
+	}
+	if (!isset($recommend) || empty($recommend) || is_null($recommend)) {
+		return 'Incomplete Recommendation';
+	}
+	if (!mc_feedback_long_enough($written)) {
+		return 'Incomplete Written';
+	}
+	return 'Complete';
+}
+
+function mc_get_writtenstatus($text) {
+	if (mc_feedback_long_enough($text)) {
+		return '<p class="green">Y</p>';
+	} else {
+		return '<p>-</p>';
+	}
+}
+
+function mc_format_completed($coi,$numerics,$recommend,$written) {	
+	
+	$status = mc_grid_complete_status($coi,$numerics,$recommend,$written);	
+	$output = '<td class="fdbk-status fdbk-' . $status . '"><p>';
+	$output .= $status;
+	return $output . '</p></td>';
+}
+
+function print_a_drupal_node_form($node_type, $node = null){
+	module_load_include('inc', 'node', 'node.pages');  
+ 
+	if(!isset($node)){
+		//set up a dummy node to make sure the form comes in right
+		global $user;
+		$node->uid = $user->uid;
+		$node->type = $node_type;	
+		node_object_prepare($node);
+	}
+ 
+	//get the node/add formfor ($c=1; $c < $num; $c++) {
+	return drupal_get_form($node_type."_node_form", $node);
+}
+
+function mc_judgedash_form_alter(&$form, $form_state, $form_id) {
+	if ($form_id == "assignment_node_form" && arg(0) == "dash") {
+		unset($form['buttons']['delete']);
+		unset($form['buttons']['preview']);
+	}
+		
+	if ($form['form_id']['#id'] == "edit-assignment-node-form" && arg(0) == "dash") {
+		// the "add plan to dashboard" form, first on the page
+		
+		$submit_value = "Add Plan to Dashboard";
+		$form['buttons']['submit']['#value'] = t($submit_value);
+		
+	 } else if ($form['form_id']['#id'] == "edit-assignment-node-form-1" && arg(0) == "dash") {
+		// the "I'm done reviewing" form, beneath the grid
+		
+		$submit_value = "I'm done reviewing these plans";
+		$msg = "Once you submit this judging assignment, you will not be able to go back to edit any information on these plans. Are you sure you want to submit?";
+		$form['#validate'][] = 'mc_judgedash_assignment_validate';
+			
+  		$jscript = 'Drupal.behaviors.mc_judgedash = function() {$(".mc-judgedash-submit #confirm_submit").click(function(){return confirm("' . $msg . '")});}';
+  		drupal_add_js($jscript, 'inline');
+  		
+  		$form['buttons']['submit'] = array
+  		(
+			'#type' => 'submit',
+			'#id' => 'confirm_submit',
+			'#value' => t($submit_value),
+		);
+	 }
+}
+
+function mc_judgedash_empty_numbers($arr) {
+	$result = FALSE;
+	$numbers = range(-1,10);
+	$tot = intval(sizeof($arr));
+	for ($c=0;$c<$tot;$c++) {
+		if (!in_array($arr[$c],$numbers)) {	
+			$result = TRUE;
+		}
+	}
+	return $result;
+}
+
+function mc_judgedash_assignment_validate($form_id, $form_values) {
+	//pull the node from the form and count it's entry forms
+	$node = node_load($form_values['values']['nid']);
+	$fdbk_arr = $node->field_feebackforms;
+	$total = count($fdbk_arr);
+	
+	//prepare an array to collect any errors
+	$errors = array();
+	
+	// iterate over all the rows in the assignment (one for each feedback form)
+	for ($c=0; $c < $total; $c++) {
+		//load the variables for each feedback to validate
+		$fdbk = node_load($node->field_feebackforms[$c]['nid']);
+		$enfm = node_load($fdbk->field_entry_form_feedback[0]['nid']);
+		
+		$coi = $fdbk->field_fdbk_coi2[0]['value'];
+		$numerics = array(
+					$fdbk->field_solutions_and_technology_s[0]["value"],
+					$fdbk->field_overall_impact_s[0]["value"],
+					$fdbk->field_customer_needs_s[0]["value"],
+					$fdbk->field_industry_and_competitors_s[0]["value"],
+					$fdbk->field_financials_s[0]["value"],
+					$fdbk->field_legal_and_regulatory_s[0]["value"],
+					$fdbk->field_founding_team_s[0]["value"]
+				);
+		$recommend = $fdbk->field_feedback_overall[0]["value"];
+		$written = $fdbk->field_fdbkwritten[0]['value'];
+		$edit_text = 'Please edit now.';
+		$edit_link = '<a href="' . $base_url . '/node/' . $fdbk->nid . '/edit/">' . $edit_text . '</a>';
+		
+		// ...the value for this feedback completion
+		$v = mc_grid_complete_status($coi,$numerics,$recommend,$written);
+		
+		switch ($v) {
+			case 'Conflict of Interest':
+				break;
+			case 'Not Judged - Other':
+				break;
+			case 'Not Started':
+				$this_error = t('@name needs to be completed. ' . $edit_link, array('@name' => $enfm->title));
+				array_push($errors,$this_error);
+				break;
+			case 'Complete':
+				//drupal_set_message($fdbk->title . " passed validation!","status");
+				break;
+			case 'Incomplete Numbers':
+				$this_error = t('At least one of your scores for @name needs to be filled. ' . $edit_link, array('@name' => $enfm->title));
+				array_push($errors,$this_error);
+				break;
+			case 'Incomplete Recommendation':
+				$this_error = t('Your overall recommendation for @name needs to be filled. ' . $edit_link, array('@name' => $enfm->title));
+				array_push($errors,$this_error);
+				break;
+			case 'Incomplete Written':
+    			$this_error = t('Your written feedback for @name is too short. You need at least %words words.' . $edit_link, array('%words' => 50, '@name' => $enfm->title));
+    			array_push($errors,$this_error);
+				break;
+			default:
+				$this_error = t('Please complete all of your plans. $v' . $edit_link, array('%words' => 50, '@name' => $enfm->title));
+    			array_push($errors,$this_error);			
+		}
+	}
+	if (sizeof($errors) > 0) {
+		for ($c=0;$c<sizeof($errors);$c++) {
+			drupal_set_message($errors[$c],'error');
+		}
+		form_set_error();
+	} else {
+		drupal_set_message('Thank you! Your judging assignment has been successfully submitted!');
+		for ($c=0; $c < $total; $c++) {
+			$fdbk = node_load($node->field_feebackforms[$c]['nid']);
+			$fdbk->status = 1;
+			//drupal_set_message('fdbk '.$fdbk->nid.' pub','status');
+			node_save($fdbk);
+		}
+		$node->status = 1;
+		//drupal_set_message("asmt validpub","status");
+		node_save($node);
+	}
+}
+
+function mc_fdbk_sync($asmt,$enfm_rows) {
+	// Sometimes, a user may have JUST added an entryform to their assignment.
+	// This function checks to see if there are any orphaned entryforms that need a feedback.
+	// If there is an entryform without a feedback, it will create the feedback and attach it.
+	$asmt_nid = $asmt->nid;
+	
+	// We're only going to make changes to the assignment if it turns out we need to.
+	$asmt_modified = FALSE;
+	
+	// first, collect the NIDs of all linked entryforms thru feedbacks attached to this assignment
+	$fdbk_rows = count($asmt->field_feebackforms);
+	$enfm_pool = array();
+	
+	for ($r=0; $r < $fdbk_rows; $r++) {
+		$fdbk = node_load($asmt->field_feebackforms[$r]['nid']);
+		$this_enfm = $fdbk->field_entry_form_feedback[0]['nid'];
+		array_push($enfm_pool,$this_enfm);
+		$fdbknid = $fdbk->nid;
+		//drupal_set_message("e$this_enfm, r$r, f$fdbknid,");
+		$enfm = node_load($this_enfm);
+		$title = $enfm->title;
+		//drupal_set_message("This entryform title: ;");
+	}
+	
+	// now, check to make sure that all the entry forms are accounted for in that collection.
+	
+	for ($r=0; $r < $enfm_rows; $r++) {
+		$enfm = node_load($asmt->field_entryforms[$r]['nid']);
+		if (!(in_array($enfm->nid,$enfm_pool))){
+			//drupal_set_message($enfm->nid." :(");
+			$add_tids = $asmt->taxonomy;
+			$fdbk = mc_enfm_add_fdbk($enfm,$add_tids);
+			$asmt->field_feebackforms[$r]['nid'] = $fdbk->nid; //@FIXME
+			$asmt_modified = TRUE;
+		} 
+		/*else {
+			drupal_set_message($enfm->nid." :)");
+		}*/
+	}
+	
+	if ($asmt_modified) {
+		node_save($asmt);
+	}
+}
+
+function mc_enfm_add_fdbk($enfm,$add_tids){
+	$title = $enfm->title;
+	//drupal_set_message("enfm title is $title"); 
+	global $user;
+	$jid = $user->uid;
+	$jdge = $jdge = user_load($jid);
+	$fdbk = mc_node_create('feedback2',$jid,$jdge->name,$enfm->title);
+	$fdbk->field_entry_form_feedback[0]['nid'] = $enfm->nid;
+	$fdbk->status = 0;
+	$fdbk->taxonomy = $add_tids;
+	node_save($fdbk);
+	drupal_set_message("Feedback form successfully added to your plan.");
+	return $fdbk;
+}

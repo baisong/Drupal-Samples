@@ -1,0 +1,186 @@
+<?php
+// $Id: mc_judgecsv.module
+
+/**
+* @file
+* Custom functions for this site.
+*/
+
+function mc_add_term($tid, $nid){
+ $node = node_load($nid);
+ $node->taxonomy[] = $tid;
+ node_save($node);
+}
+
+function mc_node_create($type,$uid,$name,$title) {
+	$time = time();
+	$node = new stdClass();
+	$node->type = $type;
+	$node->status = 1;
+	$node->uid = $uid;
+	$node->name = $name;
+	$node->title = $title;
+	$node->content["body"]["#value"] = '';
+	$node->created = $time;
+	$node->changed = $time;
+	$node->promote = 1;
+	$node->sticky = 0;
+	$node->format = 1;
+	$node->language = 'en';
+
+	/*
+	if ($type == 'feedback') {
+	$node->title = 'FEEDME';
+	$node->field_solutions_and_technology_s[0]["view"] = "Please<br/>select";
+	$node->field_overall_impact_s[0]["view"] = "Please<br/>select";
+	$node->field_customer_needs_s[0]["view"] = "Please<br/>select";
+	$node->field_industry_and_competitors_s[0]["view"] = "Please<br/>select";
+	$node->field_financials_s[0]["view"] = "Please<br/>select";
+	$node->field_legal_and_regulatory_s[0]["view"] = "Please<br/>select";
+	$node->field_founding_team_s[0]["view"] = "Please<br/>select";
+	$node->field_written_feedback[0]["view"] = "Please select";
+	$node->field_feedback_overall[0]["view"] = "Please<br/>select";
+	}*/
+	
+	node_save($node);
+	return $node;
+}
+
+function mc_nothing_to_report() {
+	drupal_set_message('This batch of assignments has not been imported yet. Edit the node\'s "Operation Fields" to do so.','status');
+}
+
+function mc_multitaskin() {
+	drupal_set_message('Hot damn, you\'re a multitasker! Deleting and reimporting...','status');
+}
+
+function mc_nothing_to_delete() {
+	drupal_set_message('This node\'s import status field is "Not Imported." Therefore, nothing was deleted.','status');
+}
+
+function mc_import_complete() {
+	drupal_set_message('These nodes have already been successfully imported. No operation was run on this pageload. Edit the node\'s "Operation Fields" group to delete these nodes.','status');
+}
+
+function mc_delete_children(&$node) {
+	$nids = explode(" ",$node->field_jb_asmt_nids[0]["value"]);
+	$nidcount = count($nids);
+	for ($c=1; $c < $nidcount; $c++) {
+		node_delete($nids[$c]);
+		#drupal_set_message('Would have deleted <a href="http://masschallenge.org/node/' . $nids[$c] . '">this</a>','status');
+	}
+	$node->field_jb_importstatus[0]["value"] = "Not Imported";
+	$node->field_jb_del_asmt[0]["value"] = "Removal Complete";
+	$node->field_jb_asmt_nids[0]["view"] = "CVS file not yet parsed.";
+	$node->field_jb_asmt_nids[0]["value"] = "";
+	node_save($node);
+
+	drupal_set_message('This node\'s successfully imported judge assignments have been REMOVED. To re-import them, edit it to change the import status from "Not Imported" to "Import."','status');
+}
+
+function mc_is_type($nid,$type) {
+	$node = node_load($nid);
+	if ($node->type == $type) {
+		return TRUE;
+	} else {
+		drupal_set_message($node->title." [nid:$nid] is of type ".$node->type.", not $type.","error");
+		return FALSE;
+	}
+}
+
+function mc_import_judge_csv(&$node,$testing=FALSE) {
+	$row = 0;
+	if (($handle = fopen($node->field_csvfile[0]["filepath"], "r")) !== FALSE) {
+    	print "<p>Processing rows ";
+    	while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+        	$num = count($data);
+        	if (!empty($data[0])){
+        		echo "$row ($num vals), ";
+        		$row++;
+        		$jid = $data[0];        	
+				$jdge = user_load($jid);
+				$prof = content_profile_load('user_profile', $jdge->uid);
+				$fname = $prof->field_ufirstname[0]['value'];
+				$lname = $prof->field_ulastname[0]['value'];
+				
+				$asmt_title = $fname . ' ' . $lname . "'s Assigned Plans"; 
+				$asmt = mc_node_create('assignment',$jdge->uid,$jdge->name,$asmt_title);  
+				
+				//add two taxonomies to $asmt
+				$terms = array(
+						"Testing" => 5497,
+						"Round 1" => 5531,
+						"Round 2" => 5532,
+						"Round 3" => 5533,
+						"Round 4" => 5534,
+				        "May11M" => 5513,
+				        "May11A" => 5514,
+				        "May12M" => 5515,
+				        "May12A" => 5516,
+				        "May13M" => 5517,
+				        "May13A" => 5518,
+				        "May16M" => 5519,
+				        "May16A" => 5520,
+				        "May17M" => 5521,
+				        "May17A" => 5522,
+				        "May18M" => 5523,
+				        "May18A" => 5524,
+				        "A" => 5525,
+				        "B" => 5526,
+				        "C" => 5527,
+				        "D" => 5528,
+				        "E" => 5529
+				);
+				
+				$round = $terms["Round 2"];
+				$panel = $terms[$data[1]];
+				$timeblock = $terms[$data[2]];
+				$testing_term = $terms["Testing"];
+				
+				if ($testing) {
+					$add_tids = array($timeblock,$panel,$round,$testing_term); 
+				} else {
+					$add_tids = array($timeblock,$panel,$round);
+				}
+				
+            	$asmt_link = htmlspecialchars('<h4><a href="' . $base_path . '/node/'. $asmt->nid .'">' . $asmt->title . ' '  . htmlspecialchars('</a></h4>'));
+				$node->field_jb_asmt_nids[0]["view"] .=  $asmt_link;
+				$node->field_jb_asmt_nids[0]["value"] .= ' ' . $asmt->nid;
+				
+        		for ($c=3; $c < $num; $c++) {
+            		if (!empty($data[$c]) && mc_is_type($data[$c],"entry_form")) {
+		        		$enfm = node_load($data[$c]);
+		        		$fdbk = mc_node_create('feedback2',$jdge->uid,$jdge->name,$enfm->title);
+		        		$fdbk->field_entry_form_feedback[0]["nid"] = $data[$c];
+		        		$fdbk->status = 0;
+		        		$fdbk->taxonomy = $add_tids;
+		        		node_save($fdbk);
+		        	
+		        		$asmt->field_entryforms[$c-1]["nid"] = $data[$c];
+		        		$asmt->field_feebackforms[$c-1]["nid"] = $fdbk->nid;
+		        	
+		        		$fdbk_link = htmlspecialchars('<div class="fdbk"><a href="' . $base_path . '/node/'. $fdbk->nid .'">' . $fdbk->title . ' '  . htmlspecialchars('(' . $c . ')</a></div>'));
+		        	
+		        		$node->field_jb_asmt_nids[0]["view"] .=  $fdbk_link;
+		        		$node->field_jb_asmt_nids[0]["value"] .= ' ' . $fdbk->nid;
+        			}
+        		}
+        		$asmt->status = 0;
+        		$asmt->taxonomy = $add_tids;
+        		
+        		node_save($asmt);
+        		
+        		//mc_add_term($terms[$timeblock],$asmt->nid);
+				//mc_add_term($terms[$panel],$asmt->nid);
+				
+        		$node->field_jb_del_asmt[0]["value"] = "Keep Live";
+    			$node->field_jb_importstatus[0]["value"] = "Import Complete";
+        		node_save($node);
+        	}
+    	}
+    	fclose($handle);
+    	drupal_set_message($row . " rows successfully processed! That means " . $row*10 . " new feedback forms have been created and assigned to " . $row . " judges. Use the links below to view, delete or re-import this content." ,'status');
+    } else {
+    	drupal_set_message("Error loading CSV file '" . $node->field_csvfile[0]["filepath"] . "'. Import failed. Please check that the file is named correctly and exists on the server.",'error');
+    }
+}

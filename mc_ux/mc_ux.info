@@ -1,0 +1,5 @@
+; $Id$
+name = MassChallenge UX
+package = "MassChallenge"
+description = Miscellaneous UX customizations for MassChallenge.
+core = 6.x
